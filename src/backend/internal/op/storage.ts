@@ -16,7 +16,6 @@ import { OnedriveAPP } from "../../drivers/onedrive_app/driver"
 import { AliyundriveOpen } from "../../drivers/aliyundrive_open/driver"
 import { GoogleDrive } from "../../drivers/google_drive/driver"
 import { QuarkDriver } from "../../drivers/quark/driver"
-import { Driver115 } from "../../drivers/115/driver"
 import { DriverCloudreve } from "../../drivers/cloudreve_v4/driver"
 import { DriverCloudreveV3 } from "../../drivers/cloudreve_v3/driver"
 import { DriverOpenlist } from "../../drivers/openlist/driver"
@@ -294,14 +293,6 @@ async function createDriver(
     normDriver === "quarkcookie"
   ) {
     driver = new QuarkDriver(parseAddition(storageConfig))
-    await driver.init?.()
-  } else if (
-    normDriver === "115" ||
-    normDriver === "115cloud" ||
-    normDriver === "115open" ||
-    normDriver === "115netdisk"
-  ) {
-    driver = new Driver115(parseAddition(storageConfig))
     await driver.init?.()
   } else if (
     normDriver === "cloudreve" ||
@@ -588,7 +579,8 @@ async function createDriver(
     normDriver === "115" ||
     normDriver === "115pan" ||
     normDriver === "115cloud" ||
-    normDriver.startsWith("115")
+    // 注意：不能吞掉 115share —— 115 分享驱动在后面的分支分发
+    (normDriver.startsWith("115") && !normDriver.includes("share"))
   ) {
     const addition = parseAddition(storageConfig)
     driver = new Pan115Driver(addition, async (tokens) => {

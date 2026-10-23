@@ -5,6 +5,7 @@ import type { StorageDriver } from "../driver/base"
 import { getDb, saveDb } from "../model/db"
 import {
   getItem,
+  getDriver,
   getOrCreateDriver,
   scheduleStoragePersistence,
 } from "./storage"
@@ -77,4 +78,91 @@ test("mounted storage roots return without initializing the remote driver", asyn
   assert.equal(result.item.name, "189")
   assert.equal(result.item.is_dir, true)
   assert.equal(result.item.sign, "-11")
+})
+
+test("115Open routes to the ported Pan115Driver with correct Open API endpoints (issue #128)", async () => {
+  // 回归背景：createDriver 分发链曾存在两个都匹配 "115open" 的分支，
+  // 靠前的残缺 Driver115 抢先命中，导致报 "[115] API error ()" 且真实
+  // code/message 被丢弃。修复后 115Open 必须路由到 Pan115Driver，
+  // 并且只请求正确的 115 Open API 端点。
+  const db: any = await getDb()
+  db.storages = [
+    {
+      id: "storage-115open-routing",
+      driver: "115Open",
+      mount_path: "/115",
+      addition: JSON.stringify({
+        access_token: "test-access-token",
+        refresh_token: "test-refresh-token",
+        root_id: "0",
+      }),
+      modified: "2026-10-23T00:00:00.000Z",
+      disabled: false,
+    },
+  ]
+  await saveDb(db)
+
+  const realFetch = globalThis.fetch
+  const urls: string[] = []
+  ;(globalThis as any).fetch = async (input: any) => {
+    const url = String(typeof input === "object" ? input.url : input)
+    urls.push(url)
+    const body = url.includes("/open/user/info")
+      ? { state: true, data: { user_id: 1, user_name: "tester" } }
+      : { state: true, data: [], count: 0 }
+    return new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    })
+  }
+
+  try {
+    const driver = await getDriver("115Open", db.storages[0])
+
+    // 必须实例化正确移植的 Pan115Driver（而不是已删除的旧 Driver115）
+    const { Pan115Driver } = await import("../../drivers/115open/driver")
+    assert.ok(driver instanceof Pan115Driver)
+
+    // init 校验必须请求正确的 Open API user/info 端点
+    assert.ok(
+      urls.some((u) => u.startsWith("https://proapi.115.com/open/user/info")),
+      `init 应请求 proapi.115.com/open/user/info，实际请求: ${urls.join(", ")}`,
+    )
+    // 旧实现的错误端点 / 双重 /open 前缀不允许再出现
+    assert.ok(
+      !urls.some((u) => u.includes("passportapi.115.com/user/info")),
+      "不允许请求旧实现错误端点 passportapi.115.com/user/info",
+    )
+    assert.ok(
+      !urls.some((u) => u.includes("/open/open/")),
+      "不允许出现双重 /open 前缀的端点",
+    )
+  } finally {
+    globalThis.fetch = realFetch
+  }
+})
+
+test("115Share driver name is not swallowed by the 115open routing branch", async () => {
+  // 回归背景：Pan115Driver 分支曾用 startsWith("115") 兜底，
+  // 把 115share 也吞掉，导致后面 115_share 分支永远不可达。
+  const db: any = await getDb()
+  db.storages = [
+    {
+      id: "storage-115share-routing",
+      driver: "115Share",
+      mount_path: "/115share",
+      addition: JSON.stringify({
+        share_code: "testsc",
+        receive_code: "testrc",
+      }),
+      modified: "2026-10-23T00:00:00.000Z",
+      disabled: false,
+    },
+  ]
+  await saveDb(db)
+
+  const driver = await getDriver("115Share", db.storages[0])
+
+  const { Pan115ShareDriver } = await import("../../drivers/115_share/driver")
+  assert.ok(driver instanceof Pan115ShareDriver)
 })
